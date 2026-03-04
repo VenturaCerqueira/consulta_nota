@@ -325,6 +325,11 @@ def handler(event, context):
     headers = event.get("headers", {})
     body = event.get("body", "")
     
+    # Normalize path - remove trailing slashes
+    path = path.rstrip("/")
+    if not path:
+        path = "/"
+    
     # Decode body if base64
     if event.get("isBase64Encoded", False):
         body = base64.b64decode(body)
@@ -333,21 +338,21 @@ def handler(event, context):
     
     content_type = headers.get("content-type", headers.get("Content-Type", ""))
     
-    # Routes
-    if path == "/api/token" and method == "POST":
+    # Routes - handle both /api prefix and without
+    if method == "POST" and ("/token" in path or path == "/api/token"):
         return handle_login(body.decode('utf-8') if body else "")
     
-    if path == "/api/extract" and method == "POST":
+    if method == "POST" and ("/extract" in path or path == "/api/extract"):
         return handle_extract(body, content_type, headers)
     
-    if path == "/api/health" and method == "GET":
+    if method == "GET" and ("/health" in path or path == "/api/health"):
         return get_response(200, {"message": "API funcionando"})
     
-    if path in ["/api/", "/api"] and method == "GET":
+    if method == "GET" and (path in ["/", "/api", "/api/"]):
         return get_response(200, {"message": "API de Extracao de Notas Fiscais"})
     
     # 404
-    return get_response(404, {"detail": "Endpoint nao encontrado"})
+    return get_response(404, {"detail": f"Endpoint nao encontrado: {path}"})
 
 
 # Export for Vercel
