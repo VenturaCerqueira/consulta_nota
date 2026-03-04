@@ -1,34 +1,37 @@
 """
 API de Extracao de Dados de Notas Fiscais em PDF - Vercel API Route
+Versao simplificada sem bcrypt
 """
 
 import json
 import base64
 import io
 import re
+import hmac
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
 
 # Third-party imports
 from jose import jwt, JWTError
-from passlib.context import CryptContext
 import pdfplumber
 
 
-# ============== AUTH MODULE ==============
-SECRET_KEY = "sua_chave_secreta_aqui_mude_em_producao"
+# ============== AUTH MODULE (SIMPLIFIED) ==============
+SECRET_KEY = "sua_chave_secreta_aqui_mude_em_producao_12345"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
+# Simple password verification (use HMAC instead of bcrypt)
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """Simple password verification using HMAC"""
+    expected = hashlib.sha256(f"{plain_password}:{SECRET_KEY}".encode()).hexdigest()
+    return hmac.compare_digest(expected, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    """Simple password hashing using SHA256"""
+    return hashlib.sha256(f"{password}:{SECRET_KEY}".encode()).hexdigest()
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -181,12 +184,13 @@ def extract_tributos(text: str) -> dict:
     ipi_match = re.search(r'IPI[^\d]*R\$\s*([\d.,]+)', text, re.IGNORECASE)
     if ipi_match:
         valor = ipi_match.group(1).replace('.', '').replace(',', '.')
-        tributos["ipi"] = float(valor)
+        tributaries["ipi"] = float(valor)
     
     return tributos
 
 
 # ============== USER DATABASE ==============
+# Password hash for "admin123" using the simple hashing method
 fake_users_db = {
     "admin": {
         "username": "admin",
@@ -316,45 +320,45 @@ def handle_extract(body: bytes, content_type: str, headers: dict) -> dict:
 def handler(event, context):
     """Vercel serverless function handler"""
     
-    # Handle CORS preflight
-    if event.get("httpMethod") == "OPTIONS":
-        return get_response(200, {"message": "OK"})
+    try:
+        # Handle CORS preflight
+        if event.get("httpMethod") == "OPTIONS":
+            return get_response(200, {"message": "OK"})
+        
+        method = event.get("httpMethod")
+        path = event.get("path", "/")
+        headers = event.get("headers", {})
+        body = event.get("body", "")
+        
+        # Normalize path - remove trailing slashes
+        path = path.rstrip("/")
+        if not path:
+            path = "/"
+        
+        # Decode body if base64
+        if event.get("isBase64Encoded", False):
+            body = base64.b64decode(body)
+        elif isinstance(body, str):
+            body = body.encode('utf-8')
+        
+        content_type = headers.get("content-type", headers.get("Content-Type", ""))
+        
+        # Routes
+        if method == "POST" and "/token" in path:
+            return handle_login(body.decode('utf-8') if body else "")
+        
+        if method == "POST" and "/extract" in path:
+            return handle_extract(body, content_type, headers)
+        
+        if method == "GET" and "/health" in path:
+            return get_response(200, {"message": "API funcionando"})
+        
+        if method == "GET" and path in ["/", "/api", ""]:
+            return get_response(200, {"message": "API de Extracao de Notas Fiscais"})
+        
+        # 404
+        return get_response(404, {"detail": f"Endpoint nao encontrado: {path}"})
     
-    method = event.get("httpMethod")
-    path = event.get("path", "/")
-    headers = event.get("headers", {})
-    body = event.get("body", "")
-    
-    # Normalize path - remove trailing slashes
-    path = path.rstrip("/")
-    if not path:
-        path = "/"
-    
-    # Decode body if base64
-    if event.get("isBase64Encoded", False):
-        body = base64.b64decode(body)
-    elif isinstance(body, str):
-        body = body.encode('utf-8')
-    
-    content_type = headers.get("content-type", headers.get("Content-Type", ""))
-    
-    # Routes - handle both /api prefix and without
-    if method == "POST" and ("/token" in path or path == "/api/token"):
-        return handle_login(body.decode('utf-8') if body else "")
-    
-    if method == "POST" and ("/extract" in path or path == "/api/extract"):
-        return handle_extract(body, content_type, headers)
-    
-    if method == "GET" and ("/health" in path or path == "/api/health"):
-        return get_response(200, {"message": "API funcionando"})
-    
-    if method == "GET" and (path in ["/", "/api", "/api/"]):
-        return get_response(200, {"message": "API de Extracao de Notas Fiscais"})
-    
-    # 404
-    return get_response(404, {"detail": f"Endpoint nao encontrado: {path}"})
-
-
-# Export for Vercel
-app = handler
+    except Exception as e:
+        return get_response(500, {"detail": f"Erro interno: {str(e)}"})
 
